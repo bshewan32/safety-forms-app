@@ -1,35 +1,39 @@
 {
   "name": "safety-forms-backend",
   "version": "1.0.0",
-  "main": "server.js",
+  "description": "Backend API for safety forms processing",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "server": "nodemon src/server.js",
+    "test": "jest",
+    "lint": "eslint src/",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "node prisma/seed.js",
-    "test": "jest"
+    "db:studio": "prisma studio",
+    "db:seed": "node src/seed.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "prisma": "^5.6.0",
-    "@prisma/client": "^5.6.0",
-    "multer": "^1.4.5-lts.1",
-    "sharp": "^0.32.6",
-    "tesseract.js": "^5.0.2",
-    "openai": "^4.20.1",
-    "@google-cloud/vision": "^4.0.2",
-    "jsonwebtoken": "^9.0.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.4.5",
+    "@prisma/client": "^5.10.2",
     "bcryptjs": "^2.4.3",
-    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.33.2",
+    "tesseract.js": "^5.0.4",
+    "openai": "^4.28.4",
+    "zod": "^3.22.4",
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1",
+    "nodemon": "^3.0.3",
     "jest": "^29.7.0",
-    "@types/node": "^20.8.9"
+    "supertest": "^6.3.4",
+    "prisma": "^5.10.2"
   }
 }

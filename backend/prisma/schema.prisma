@@ -1,0 +1,158 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ProcessedForm {
+  id                      String   @id @default(cuid())
+  processingId           String   @unique
+  originalFileName       String
+  formType               FormType @default(TAKE5)
+  workerName             String?
+  site                   String?
+  extractedText          String   @db.Text
+  aiAnalysis             Json
+  riskScore              Int
+  requiresSupervisorReview Boolean @default(false)
+  status                 FormStatus @default(PENDING_REVIEW)
+  reviewedBy             String?
+  reviewedAt             DateTime?
+  reviewNotes            String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  metadata               Json?
+  
+  // Relations
+  issues                 SafetyIssue[]
+  complianceChecks       ComplianceCheck[]
+  
+  @@map("processed_forms")
+  @@index([status, createdAt])
+  @@index([riskScore, createdAt])
+  @@index([site, formType])
+}
+
+model SafetyIssue {
+  id          String      @id @default(cuid())
+  formId      String
+  category    IssueCategory
+  description String
+  severity    Severity
+  recommendation String?
+  resolved    Boolean     @default(false)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  createdAt   DateTime    @default(now())
+  
+  form        ProcessedForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  
+  @@map("safety_issues")
+  @@index([category, severity])
+}
+
+model ComplianceCheck {
+  id          String      @id @default(cuid())
+  formId      String
+  standard    String
+  issue       String?
+  action      String?
+  compliant   Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  
+  form        ProcessedForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  
+  @@map("compliance_checks")
+}
+
+model ProcessingLog {
+  id            String      @id @default(cuid())
+  processingId  String
+  status        ProcessingStatus
+  errorMessage  String?
+  processingTime Int?        // milliseconds
+  aiProvider    String?
+  metadata      Json?
+  createdAt     DateTime    @default(now())
+  
+  @@map("processing_logs")
+  @@index([status, createdAt])
+}
+
+model User {
+  id          String      @id @default(cuid())
+  email       String      @unique
+  name        String
+  role        UserRole    @default(WORKER)
+  site        String?
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  @@map("users")
+}
+
+model SystemConfig {
+  id          String      @id @default(cuid())
+  key         String      @unique
+  value       Json
+  description String?
+  updatedAt   DateTime    @updatedAt
+  
+  @@map("system_config")
+}
+
+// Enums
+enum FormType {
+  TAKE5
+  SWMS
+  JSEA
+  JHA
+  INCIDENT_REPORT
+  TOOLBOX_TALK
+  OTHER
+}
+
+enum FormStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum IssueCategory {
+  PPE
+  HAZARD
+  PROCEDURE
+  DOCUMENTATION
+  ENVIRONMENTAL
+  EQUIPMENT
+  TRAINING
+  OTHER
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ProcessingStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+enum UserRole {
+  WORKER
+  SUPERVISOR
+  ADMIN
+  SUPER_ADMIN
+}

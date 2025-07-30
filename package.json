@@ -1,27 +1,48 @@
 {
   "name": "safety-forms-app",
   "version": "1.0.0",
+  "description": "Digital safety forms processing with AI analysis",
   "private": true,
-  "workspaces": [
-    "backend",
-    "frontend", 
-    "mobile",
-    "shared"
-  ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && npm run dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:mobile": "cd mobile && npm start",
-    "install:all": "npm install && npm run install:backend && npm run install:frontend && npm run install:mobile",
-    "install:backend": "cd backend && npm install",
-    "install:frontend": "cd frontend && npm install", 
-    "install:mobile": "cd mobile && npm install",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "cd frontend && npm run build",
-    "build:backend": "cd backend && npm run build"
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:mobile": "pnpm --filter mobile dev",
+    "build": "pnpm --filter backend build && pnpm --filter frontend build",
+    "test": "pnpm --filter backend test && pnpm --filter frontend test",
+    "lint": "pnpm --filter backend lint && pnpm --filter frontend lint",
+    "setup": "pnpm install && pnpm db:generate",
+    "db:generate": "pnpm --filter backend db:generate",
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "install:all": "pnpm install"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "jest": "^30.0.5",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.2.5",
+    "prisma": "^6.13.0",
+    "supertest": "^7.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.13.0",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "openai": "^5.10.2",
+    "sharp": "^0.34.3",
+    "tesseract.js": "^6.0.1",
+    "winston": "^3.17.0",
+    "zod": "^3.25.76"
   }
 }
