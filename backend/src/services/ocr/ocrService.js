@@ -1,0 +1,645 @@
+// backend/src/services/ocr/ocrService.js - Fixed checkbox detection
+const Tesseract = require('tesseract.js');
+const vision = require('@google-cloud/vision');
+const sharp = require('sharp');
+const fs = require('fs').promises;
+const logger = require('../utils/logger');
+
+class OCRService {
+  constructor() {
+    this.tesseractWorker = null;
+    this.visionClient = null;
+    this.isInitialized = false;
+    this.initializeProviders();
+  }
+
+  async initializeProviders() {
+    try {
+      // Initialize Google Vision if credentials available
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_PROJECT) {
+        try {
+          this.visionClient = new vision.ImageAnnotatorClient();
+          logger.info('Google Vision API initialized successfully');
+        } catch (visionError) {
+          logger.warn('Google Vision initialization failed', { error: visionError.message });
+        }
+      }
+
+      // Initialize Tesseract worker
+      await this.initializeTesseract();
+      
+      this.isInitialized = true;
+      logger.info('OCR Service initialized with available providers', {
+        tesseract: !!this.tesseractWorker,
+        googleVision: !!this.visionClient
+      });
+      
+    } catch (error) {
+      logger.error('OCR Service initialization failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  async initializeTesseract() {
+    try {
+      logger.info('Initializing Tesseract OCR worker...');
+      
+      this.tesseractWorker = await Tesseract.createWorker('eng', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            logger.debug(`Tesseract Progress: ${Math.round(m.progress * 100)}%`);
+          }
+        }
+      });
+
+      // Enhanced parameters for safety forms with MAXIMUM checkbox support
+      await this.tesseractWorker.setParameters({
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+        // MAXIMUM whitelist - include everything that might be a checkbox
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?-:()[]/_☐☑☒✓✗✘×√◯●○◉■□▪▫◆◇▲△▼▽★☆',
+        preserve_interword_spaces: '1',
+        tessedit_enable_doc_dict: '0',
+        classify_enable_learning: '0',
+        // Additional parameters for symbol detection
+        tessedit_char_blacklist: '',  // Don't blacklist anything
+        tessedit_write_images: '0',
+        textord_really_old_xheight: '1',
+        segment_penalty_dict_nonword: '0',
+        segment_penalty_garbage: '0'
+      });
+
+      logger.info('Tesseract worker initialized successfully with enhanced checkbox support');
+      
+    } catch (error) {
+      logger.error('Tesseract initialization failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  async preprocessImage(imageBuffer, metadata = {}) {
+    try {
+      const startTime = Date.now();
+      let processedBuffer = imageBuffer;
+      const preprocessing = [];
+
+      // Only preprocess if it's a mobile capture or low quality image
+      const shouldPreprocess = metadata.captureMethod === 'mobile_camera' || 
+                               metadata.imageQuality < 0.7;
+
+      if (shouldPreprocess) {
+        const image = sharp(imageBuffer);
+        const imageMetadata = await image.metadata();
+        
+        // Auto-rotate based on EXIF
+        if (imageMetadata.orientation && imageMetadata.orientation > 1) {
+          image.rotate();
+          preprocessing.push('auto_rotate');
+        }
+
+        // Resize if too large (optimization)
+        if (imageMetadata.width > 2000 || imageMetadata.height > 2000) {
+          image.resize(2000, null, { 
+            withoutEnlargement: true,
+            kernel: sharp.kernel.lanczos3
+          });
+          preprocessing.push('resize');
+        }
+
+        // Enhance for OCR with special attention to checkboxes
+        image
+          .normalize() // Auto-levels
+          .sharpen({ sigma: 1.0, flat: 1.0, jagged: 2.0 }) // Text sharpening
+          .modulate({ brightness: 1.1, contrast: 1.3 }) // Higher contrast for checkboxes
+          .greyscale(); // Better for OCR
+
+        preprocessing.push('normalize', 'sharpen', 'contrast_enhance', 'greyscale');
+
+        processedBuffer = await image.png().toBuffer();
+      }
+
+      const processingTime = Date.now() - startTime;
+      
+      logger.debug('Image preprocessing completed', {
+        preprocessing,
+        processingTime: `${processingTime}ms`,
+        originalSize: imageBuffer.length,
+        processedSize: processedBuffer.length
+      });
+
+      return {
+        buffer: processedBuffer,
+        preprocessing,
+        processingTime
+      };
+
+    } catch (error) {
+      logger.warn('Image preprocessing failed, using original', { error: error.message });
+      return {
+        buffer: imageBuffer,
+        preprocessing: [],
+        processingTime: 0
+      };
+    }
+  }
+
+  async extractTextWithGoogleVision(imageBuffer) {
+    if (!this.visionClient) {
+      throw new Error('Google Vision not available');
+    }
+
+    try {
+      const startTime = Date.now();
+      
+      const [result] = await this.visionClient.textDetection({
+        image: { content: imageBuffer }
+      });
+
+      const processingTime = Date.now() - startTime;
+      const annotations = result.textAnnotations;
+      
+      if (!annotations || annotations.length === 0) {
+        return {
+          text: '',
+          confidence: 0,
+          provider: 'google_vision',
+          processingTime,
+          metadata: { annotations: 0 }
+        };
+      }
+
+      // Get full text from first annotation
+      const fullText = annotations[0].description || '';
+      
+      // Calculate confidence based on detection quality
+      const confidence = this.calculateGoogleVisionConfidence(annotations);
+
+      const cleanedText = this.cleanSafetyFormText(fullText);
+
+      // DEBUG: Analyze checkboxes in Google Vision output too
+      const checkboxInfo = this.analyzeCheckboxes(cleanedText);
+      logger.info('Google Vision checkbox detection analysis', checkboxInfo);
+
+      return {
+        text: cleanedText,
+        confidence,
+        provider: 'google_vision',
+        processingTime,
+        metadata: {
+          annotations: annotations.length,
+          fullTextAnnotation: result.fullTextAnnotation ? 'available' : 'none',
+          checkboxes: checkboxInfo
+        }
+      };
+
+    } catch (error) {
+      logger.error('Google Vision OCR failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  calculateGoogleVisionConfidence(annotations) {
+    // Google Vision doesn't provide confidence scores directly
+    // We estimate based on detection quality
+    if (!annotations || annotations.length < 2) return 50;
+    
+    const textLength = annotations[0].description?.length || 0;
+    const wordCount = annotations.length - 1; // First is full text
+    
+    let confidence = 85; // Base confidence for Google Vision
+    
+    // Boost for longer, more structured text
+    if (textLength > 100) confidence += 5;
+    if (textLength > 500) confidence += 5;
+    if (wordCount > 20) confidence += 5;
+    
+    return Math.min(100, confidence);
+  }
+
+  async extractTextWithTesseract(imageBuffer) {
+    if (!this.tesseractWorker) {
+      await this.initializeTesseract();
+    }
+
+    try {
+      const startTime = Date.now();
+      
+      const { data } = await this.tesseractWorker.recognize(imageBuffer);
+      const processingTime = Date.now() - startTime;
+
+      const cleanedText = this.cleanSafetyFormText(data.text);
+      const enhancedConfidence = this.calculateEnhancedConfidence(data);
+
+      // DEBUG: Log checkbox detection
+      const checkboxInfo = this.analyzeCheckboxes(cleanedText);
+      logger.info('Checkbox detection analysis', checkboxInfo);
+
+      return {
+        text: cleanedText,
+        confidence: enhancedConfidence,
+        provider: 'tesseract',
+        processingTime,
+        metadata: {
+          words: data.words?.length || 0,
+          lines: data.lines?.length || 0,
+          paragraphs: data.paragraphs?.length || 0,
+          originalConfidence: Math.round(data.confidence || 0),
+          checkboxes: checkboxInfo
+        }
+      };
+
+    } catch (error) {
+      logger.error('Tesseract OCR failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  analyzeCheckboxes(text) {
+    // Primary checkbox detection
+    const symbolCheckmarks = (text.match(/[✓✔√]/g) || []).length;
+    const symbolXmarks = (text.match(/[✗✘×]/g) || []).length;
+    const symbolBoxes = (text.match(/[☐☑☒]/g) || []).length;
+    const regularX = (text.match(/\bX\b/g) || []).length;
+    
+    // Alternative detection - look for text patterns that might indicate checkboxes
+    const textPatterns = {
+      // Look for safety items followed by potential checkbox indicators
+      h2sWithX: /H2S.*?(?:X|x|N\/A|\[\s*X\s*\])/i.test(text),
+      hearingWithX: /hearing.*?(?:X|x|N\/A|\[\s*X\s*\])/i.test(text),
+      weatherWithX: /weather.*?(?:X|x|N\/A|\[\s*X\s*\])/i.test(text),
+      barricadWithX: /barricad.*?(?:X|x|N\/A|\[\s*X\s*\])/i.test(text),
+      fallProtectionWithTick: /fall.*protection.*?(?:✓|√|tick|yes|\[\s*✓\s*\])/i.test(text),
+      
+      // Look for checkbox-like patterns in text
+      bracketsWithX: (text.match(/\[\s*[Xx]\s*\]/g) || []).length,
+      bracketsWithTick: (text.match(/\[\s*[✓√]\s*\]/g) || []).length,
+      isolatedX: (text.match(/\s+[Xx]\s+/g) || []).length,
+      
+      // Line-by-line analysis for safety items
+      h2sLine: this.extractLineContaining(text, 'H2S'),
+      hearingLine: this.extractLineContaining(text, 'hearing'),
+      weatherLine: this.extractLineContaining(text, 'weather'),
+      barricadLine: this.extractLineContaining(text, 'barricad'),
+      fallLine: this.extractLineContaining(text, 'fall')
+    };
+    
+    return {
+      // Original symbol detection
+      checkmarks: symbolCheckmarks,
+      xmarks: symbolXmarks,
+      boxes: symbolBoxes,
+      regularX: regularX,
+      
+      // Content detection
+      containsH2S: /H2S/i.test(text),
+      containsHearing: /hearing/i.test(text),
+      containsWeather: /weather/i.test(text),
+      containsBarricad: /barricad/i.test(text),
+      
+      // Pattern analysis
+      textPatterns: textPatterns,
+      
+      // Sample for debugging
+      sampleText: text.substring(0, 500),
+      fullTextLength: text.length
+    };
+  }
+
+  extractLineContaining(text, keyword) {
+    const lines = text.split('\n');
+    const matchingLine = lines.find(line => 
+      line.toLowerCase().includes(keyword.toLowerCase())
+    );
+    return matchingLine ? matchingLine.trim() : null;
+  }
+
+  cleanSafetyFormText(rawText) {
+    if (!rawText) return '';
+
+    let cleaned = rawText;
+
+    // Remove excessive whitespace while preserving structure
+    cleaned = cleaned.replace(/\s+/g, ' ');
+    cleaned = cleaned.replace(/\n\s*\n/g, '\n');
+    
+    // Fix common OCR errors in safety forms - BUT PRESERVE CHECKBOX SYMBOLS!
+    const safeReplacements = {
+      // Safety form specific terms (be more conservative)
+      'HAZARD': /HAZ[A4]RD/gi,
+      'RISK': /RI[S5]K/gi,
+      'SAFETY': /[S5]AFETY/gi,
+      'CONTROL': /CONTR[O0]L/gi,
+      'EMERGENCY': /EMERGENCY/gi,
+    };
+
+    // Apply only safe replacements that won't affect checkboxes
+    try {
+      Object.entries(safeReplacements).forEach(([replacement, pattern]) => {
+        cleaned = cleaned.replace(pattern, replacement);
+      });
+    } catch (regexError) {
+      logger.warn('Text cleaning regex error', { error: regexError.message });
+    }
+
+    // IMPORTANT: DO NOT convert checkbox symbols - preserve them as-is!
+    // The original code was incorrectly converting [X] to ☑
+
+    // Clean up extra spaces and normalize line breaks
+    cleaned = cleaned.trim();
+    cleaned = cleaned.replace(/\n\s+/g, '\n');
+    cleaned = cleaned.replace(/\s+\n/g, '\n');
+
+    return cleaned;
+  }
+
+  async extractText(imageBuffer, provider = 'auto', metadata = {}) {
+    try {
+      if (!this.isInitialized) {
+        await this.initializeProviders();
+      }
+
+      logger.info('Starting OCR text extraction', { 
+        provider, 
+        bufferSize: imageBuffer.length,
+        captureMethod: metadata.captureMethod 
+      });
+
+      // Preprocess image if needed
+      const { buffer: processedBuffer, preprocessing } = await this.preprocessImage(imageBuffer, metadata);
+      
+      const results = [];
+      const providerPriority = this.getProviderPriority(provider, metadata);
+
+      // Try providers in order of priority
+      for (const providerName of providerPriority) {
+        try {
+          let result;
+          
+          if (providerName === 'google_vision' && this.visionClient) {
+            result = await this.extractTextWithGoogleVision(processedBuffer);
+          } else if (providerName === 'tesseract' && this.tesseractWorker) {
+            result = await this.extractTextWithTesseract(processedBuffer);
+          } else {
+            continue; // Skip unavailable providers
+          }
+
+          result.preprocessing = preprocessing;
+          results.push(result);
+
+          // If we get excellent results, stop trying other providers
+          if (result.confidence > 90 && result.text.length > 50) {
+            logger.info('High confidence result achieved, stopping provider chain', {
+              provider: result.provider,
+              confidence: result.confidence
+            });
+            break;
+          }
+
+        } catch (providerError) {
+          logger.warn(`OCR provider ${providerName} failed`, { 
+            error: providerError.message 
+          });
+          continue;
+        }
+      }
+
+      if (results.length === 0) {
+        throw new Error('All OCR providers failed');
+      }
+
+      // Return best result
+      const bestResult = this.selectBestResult(results);
+      
+      logger.info('OCR extraction completed', {
+        provider: bestResult.provider,
+        confidence: bestResult.confidence,
+        textLength: bestResult.text.length,
+        totalProvidersTried: results.length
+      });
+
+      return {
+        ...bestResult,
+        allResults: results.length > 1 ? results : undefined,
+        extractedAt: new Date().toISOString()
+      };
+
+    } catch (error) {
+      logger.error('OCR extraction completely failed', { error: error.message });
+      
+      // Return fallback result
+      return {
+        text: '',
+        confidence: 0,
+        provider: 'none',
+        processingTime: 0,
+        error: error.message,
+        extractedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  getProviderPriority(preferredProvider, metadata) {
+    // Smart provider selection based on context
+    if (preferredProvider === 'google_vision') {
+      return ['google_vision', 'tesseract'];
+    } else if (preferredProvider === 'tesseract') {
+      return ['tesseract', 'google_vision'];
+    }
+    
+    // Auto mode - PREFER Google Vision for checkbox detection
+    // Google Vision is much better at detecting symbols and checkboxes
+    return ['google_vision', 'tesseract'];
+  }
+
+  selectBestResult(results) {
+    if (results.length === 1) return results[0];
+
+    // Score each result based on confidence and text quality
+    return results.reduce((best, current) => {
+      const bestScore = this.calculateResultScore(best);
+      const currentScore = this.calculateResultScore(current);
+      return currentScore > bestScore ? current : best;
+    });
+  }
+
+  calculateResultScore(result) {
+    const { confidence, text, provider } = result;
+    
+    // Base score from confidence
+    let score = confidence;
+    
+    // Bonus for text length (more text usually better)
+    const lengthBonus = Math.min(20, text.length / 20);
+    score += lengthBonus;
+    
+    // Provider-specific bonuses
+    if (provider === 'google_vision') score += 5; // Slight preference for Google Vision
+    
+    // Penalty for very short text
+    if (text.length < 20) score -= 20;
+    
+    // Bonus for checkbox detection
+    const checkboxCount = (text.match(/[✓✗✘×☐☑☒]/g) || []).length;
+    if (checkboxCount > 0) score += checkboxCount * 2;
+    
+    return score;
+  }
+
+  calculateEnhancedConfidence(ocrData) {
+    // Use original confidence as baseline
+    let baseConfidence = Math.round(ocrData.confidence || 0);
+    
+    // If we have word-level data, use it for better calculation
+    if (ocrData.words && ocrData.words.length > 0) {
+      const wordConfidences = ocrData.words
+        .filter(word => word.confidence !== undefined && word.confidence > 0)
+        .map(word => word.confidence);
+
+      if (wordConfidences.length > 0) {
+        // Use median instead of average for more stable results
+        wordConfidences.sort((a, b) => a - b);
+        const median = wordConfidences[Math.floor(wordConfidences.length / 2)];
+        baseConfidence = Math.round(median);
+      }
+    }
+
+    // Boost confidence for safety form keywords
+    const text = (ocrData.text || '').toUpperCase();
+    const safetyKeywords = [
+      'HAZARD', 'RISK', 'PPE', 'SAFETY', 'SWMS', 'JSA', 'JHA', 
+      'ASSESSMENT', 'CONTROL', 'PROCEDURE', 'EMERGENCY', 'WORK',
+      'SITE', 'TASK', 'DATE', 'NAME', 'SIGNATURE', 'H2S', 'HEARING'
+    ];
+    
+    const keywordMatches = safetyKeywords.filter(keyword => 
+      text.includes(keyword)
+    ).length;
+    
+    // Add bonus for safety keywords (max 15% bonus)
+    const keywordBonus = Math.min(15, keywordMatches * 2);
+    const enhancedConfidence = Math.min(100, baseConfidence + keywordBonus);
+    
+    return enhancedConfidence;
+  }
+
+  // Rest of the methods remain the same...
+  async extractSafetyFormData(imageBuffer, metadata = {}) {
+    const ocrResult = await this.extractText(imageBuffer, 'auto', metadata);
+    const text = ocrResult.text.toLowerCase();
+    
+    // Enhanced field extraction patterns
+    const extractedData = {
+      raw_text: ocrResult.text,
+      confidence: ocrResult.confidence,
+      provider: ocrResult.provider,
+      
+      // Common safety form fields
+      worker_name: this.extractField(text, ['name:', 'worker:', 'employee:', 'person:']),
+      date: this.extractField(text, ['date:', 'on:', 'day:']),
+      location: this.extractField(text, ['location:', 'site:', 'area:', 'workplace:']),
+      task_description: this.extractField(text, ['task:', 'work:', 'job:', 'activity:']),
+      supervisor: this.extractField(text, ['supervisor:', 'manager:', 'foreman:']),
+      
+      // Safety-specific fields
+      hazards: this.extractHazards(text),
+      controls: this.extractControls(text),
+      ppe_required: this.extractPPE(text),
+      
+      // Form type detection
+      form_type: this.detectFormType(text),
+      
+      // Risk indicators
+      risk_level: this.extractRiskLevel(text),
+      emergency_procedures: this.extractEmergencyInfo(text)
+    };
+
+    return {
+      ...extractedData,
+      processing_metadata: {
+        extracted_at: new Date().toISOString(),
+        ocr_confidence: ocrResult.confidence,
+        text_length: ocrResult.text.length,
+        provider_used: ocrResult.provider,
+        preprocessing_applied: ocrResult.preprocessing || []
+      }
+    };
+  }
+
+  extractField(text, patterns) {
+    for (const pattern of patterns) {
+      const regex = new RegExp(`${pattern}\\s*([^\\n]{1,100})`, 'i');
+      const match = text.match(regex);
+      if (match) {
+        return match[1].trim().replace(/[_\-]{2,}/g, ''); // Clean up form lines
+      }
+    }
+    return null;
+  }
+
+  extractHazards(text) {
+    const hazardKeywords = [
+      'electrical', 'fall', 'chemical', 'moving parts', 'noise', 'heat',
+      'confined space', 'lifting', 'slipping', 'cutting', 'crushing',
+      'fire', 'explosion', 'toxic', 'radiation', 'vibration'
+    ];
+    
+    return hazardKeywords.filter(keyword => text.includes(keyword));
+  }
+
+  extractControls(text) {
+    const controlKeywords = [
+      'lockout', 'tagout', 'permit', 'isolation', 'barrier', 'guard',
+      'training', 'supervision', 'inspection', 'maintenance', 'procedure'
+    ];
+    
+    return controlKeywords.filter(keyword => text.includes(keyword));
+  }
+
+  extractPPE(text) {
+    const ppeItems = [
+      'hard hat', 'safety glasses', 'gloves', 'safety boots', 'hi-vis',
+      'respirator', 'hearing protection', 'harness', 'helmet'
+    ];
+    
+    return ppeItems.filter(item => text.includes(item));
+  }
+
+  extractRiskLevel(text) {
+    if (text.includes('high risk') || text.includes('critical')) return 'high';
+    if (text.includes('medium risk') || text.includes('moderate')) return 'medium';
+    if (text.includes('low risk') || text.includes('minimal')) return 'low';
+    return 'unknown';
+  }
+
+  extractEmergencyInfo(text) {
+    const emergencyKeywords = ['emergency', 'evacuation', 'first aid', 'fire alarm', 'muster point'];
+    return emergencyKeywords.filter(keyword => text.includes(keyword));
+  }
+
+  detectFormType(text) {
+    if (text.includes('take 5') || text.includes('take five')) return 'TAKE5';
+    if (text.includes('swms') || text.includes('safe work method')) return 'SWMS';
+    if (text.includes('jsa') || text.includes('job safety analysis')) return 'JSA';
+    if (text.includes('jha') || text.includes('job hazard analysis')) return 'JHA';
+    if (text.includes('risk assessment') || text.includes('hazard assessment')) return 'HAZARD_ASSESSMENT';
+    if (text.includes('permit to work') || text.includes('work permit')) return 'WORK_PERMIT';
+    return 'UNKNOWN';
+  }
+
+  async cleanup() {
+    try {
+      if (this.tesseractWorker) {
+        await this.tesseractWorker.terminate();
+        this.tesseractWorker = null;
+      }
+      
+      this.visionClient = null;
+      this.isInitialized = false;
+      
+      logger.info('OCR service cleaned up successfully');
+    } catch (error) {
+      logger.warn('Error during OCR cleanup', { error: error.message });
+    }
+  }
+}
+
+module.exports = new OCRService;

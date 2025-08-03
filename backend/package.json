@@ -1,0 +1,43 @@
+{
+  "name": "safety-forms-backend",
+  "version": "1.0.0",
+  "description": "Backend API for safety forms processing",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "jest",
+    "lint": "eslint src/",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "node src/seed.js"
+  },
+  "dependencies": {
+    "@google-cloud/vision": "^4.0.2",
+    "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^5.10.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "google-auth-library": "^10.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.28.4",
+    "pg": "^8.11.3",
+    "sharp": "^0.33.2",
+    "tesseract.js": "^5.0.4",
+    "uuid": "^9.0.0",
+    "winston": "^3.11.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.3",
+    "prisma": "^5.10.2",
+    "supertest": "^6.3.4"
+  }
+}

@@ -1,0 +1,387 @@
+// // backend/src/services/ai/aiAnalysisService.js - Enhanced for Australian Safety Forms
+// const axios = require('axios');
+// const logger = require('../utils/logger');
+
+// class DeepSeekProvider {
+//   constructor() {
+//     this.apiKey = process.env.DEEPSEEK_API_KEY;
+//     this.baseUrl = 'https://api.deepseek.com/v1';
+//     this.model = 'deepseek-chat';
+    
+//     if (!this.apiKey) {
+//       throw new Error('DEEPSEEK_API_KEY is required');
+//     }
+//   }
+
+//   async analyzeSafetyForm(extractedText, formType = 'unknown') {
+//     try {
+//       logger.info('Starting DeepSeek safety form analysis', { 
+//         textLength: extractedText.length, 
+//         formType 
+//       });
+
+//       const prompt = this.buildEnhancedSafetyAnalysisPrompt(extractedText, formType);
+      
+//       const response = await axios.post(
+//         `${this.baseUrl}/chat/completions`,
+//         {
+//           model: this.model,
+//           messages: [
+//             {
+//               role: "system",
+//               content: "You are an expert Australian workplace safety officer with deep knowledge of Take 5, SWMS, JSA, JHA, and Hazard Assessment forms. Analyze workplace safety documentation and provide structured analysis in valid JSON format only."
+//             },
+//             {
+//               role: "user", 
+//               content: prompt
+//             }
+//           ],
+//           temperature: 0.1,
+//           max_tokens: 3000,
+//           response_format: { type: "json_object" }
+//         },
+//         {
+//           headers: {
+//             'Authorization': `Bearer ${this.apiKey}`,
+//             'Content-Type': 'application/json'
+//           },
+//           timeout: 30000
+//         }
+//       );
+
+//       const analysisText = response.data.choices[0].message.content;
+//       const analysis = JSON.parse(analysisText);
+      
+//       // Validate and enhance the response
+//       const enhancedAnalysis = this.enhanceAnalysis(analysis, extractedText);
+      
+//       logger.info('DeepSeek analysis completed', { 
+//         formType: enhancedAnalysis.formType,
+//         riskScore: enhancedAnalysis.riskScore,
+//         issueCount: enhancedAnalysis.flaggedIssues?.length || 0
+//       });
+
+//       return enhancedAnalysis;
+
+//     } catch (error) {
+//       logger.error('DeepSeek analysis failed', { error: error.message });
+      
+//       // Return structured error response
+//       return {
+//         formType: 'UNKNOWN',
+//         riskScore: 8,
+//         riskLevel: 'HIGH',
+//         error: 'AI analysis temporarily unavailable',
+//         flaggedIssues: [{
+//           category: 'SYSTEM',
+//           description: 'AI analysis service error - manual review required',
+//           severity: 'HIGH',
+//           recommendation: 'Please review form manually and verify all safety requirements',
+//           location: 'System Error'
+//         }],
+//         complianceIssues: [],
+//         summary: 'Analysis failed - requires immediate manual safety review',
+//         requiresSupervisorReview: true,
+//         formCompleteness: 'REQUIRES_REVIEW',
+//         missingFields: ['AI analysis failed'],
+//         positiveFindings: [],
+//         analysisStatus: 'FAILED'
+//       };
+//     }
+//   }
+
+//   buildEnhancedSafetyAnalysisPrompt(extractedText, formType) {
+//     return `Analyze this Australian workplace safety form and provide comprehensive safety assessment.
+
+// EXTRACTED TEXT FROM FORM:
+// ${extractedText}
+
+// ANALYSIS REQUIREMENTS:
+
+// 1. **FORM TYPE DETECTION** - Identify the specific type:
+//    - "TAKE_5": Take 5 safety checklist (5 questions: Stop, Look, Assess, Manage, Monitor)
+//    - "SWMS": Safe Work Method Statement 
+//    - "JSA": Job Safety Analysis
+//    - "JHA": Job Hazard Analysis  
+//    - "JSEA": Job Safety and Environmental Analysis
+//    - "PTB": Pre-Task Brief or Pre-Task Briefing
+//    - "HAZARD_ASSESSMENT": Hazard identification and risk assessment
+//    - "PERMIT_TO_WORK": Work permit or isolation permit
+//    - "TOOLBOX_TALK": Safety briefing record
+//    - "INCIDENT_REPORT": Accident/incident documentation
+//    - "SAFETY_INDUCTION": Site safety induction checklist
+//    - Look for keywords like: "Take 5", "SWMS", "JSA", "JHA", "JSEA", "PTB", "Pre-Task Brief", "Hazard Assessment", "Risk Assessment"
+
+// 2. **HAZARD IDENTIFICATION** - Scan for specific Australian workplace hazards:
+//    - **ELECTRICAL**: Live wires, switchboards, power tools, electrical work, isolation required
+//    - **FALL_PROTECTION**: Height work, ladders, scaffolding, roof work, edge protection, harnesses
+//    - **MECHANICAL**: Moving machinery, crushing hazards, cutting tools, rotating equipment
+//    - **CHEMICAL**: Hazardous substances, solvents, acids, gases, fumes, MSDS references
+//    - **MANUAL_HANDLING**: Heavy lifting, repetitive work, awkward postures
+//    - **CONFINED_SPACE**: Tanks, vessels, underground work, atmospheric testing
+//    - **VEHICLE_MOVEMENT**: Mobile plant, reversing vehicles, pedestrian separation
+//    - **ENVIRONMENTAL**: Weather conditions, noise, dust, temperature extremes
+
+// 3. **PPE REQUIREMENTS** - Identify required personal protective equipment:
+//    - Hard hats/safety helmets, safety glasses/goggles, hearing protection
+//    - High-visibility clothing, safety boots, gloves (specify type)
+//    - Respirators, fall arrest harnesses, face shields
+
+// 4. **RISK ASSESSMENT** - Evaluate based on Australian standards:
+//    - Initial risk level before controls
+//    - Risk controls implemented
+//    - Residual risk after controls
+//    - Risk matrix scoring (Consequence × Likelihood)
+
+// 5. **COMPLIANCE CHECK** - Reference Australian standards:
+//    - AS/NZS 4801 (Occupational Health & Safety Management)
+//    - AS/NZS 1885 (Fall Protection)
+//    - AS/NZS 3000 (Electrical Installations)
+//    - AS/NZS 2210 (PPE Selection)
+//    - Work Health and Safety Regulations
+
+// 6. **FORM COMPLETENESS** - Check for missing critical information:
+//    - Worker signatures, supervisor approval, date/time
+//    - Risk ratings, control measures, emergency procedures
+//    - Location details, equipment inspections
+
+// Return ONLY valid JSON in this exact format:
+// {
+//   "formType": "[TAKE_5|SWMS|JSA|JHA|JSEA|PTB|HAZARD_ASSESSMENT|PERMIT_TO_WORK|TOOLBOX_TALK|INCIDENT_REPORT|SAFETY_INDUCTION|UNKNOWN]",
+//   "formTypeConfidence": "[HIGH|MEDIUM|LOW]",
+//   "riskScore": [1-10 integer],
+//   "riskLevel": "[LOW|MEDIUM|HIGH|CRITICAL]",
+//   "flaggedIssues": [
+//     {
+//       "category": "[ELECTRICAL|FALL_PROTECTION|MECHANICAL|CHEMICAL|MANUAL_HANDLING|CONFINED_SPACE|VEHICLE_MOVEMENT|ENVIRONMENTAL|PPE|PROCEDURE]",
+//       "description": "specific safety concern identified from the form text",
+//       "severity": "[LOW|MEDIUM|HIGH|CRITICAL]", 
+//       "recommendation": "specific corrective action required",
+//       "location": "where in form this issue was found",
+//       "controlMeasures": ["list of existing controls mentioned"],
+//       "additionalControls": ["recommended additional safety controls"]
+//     }
+//   ],
+//   "ppeRequired": [
+//     {
+//       "type": "[HARD_HAT|SAFETY_GLASSES|HEARING_PROTECTION|HIGH_VIS|SAFETY_BOOTS|GLOVES|RESPIRATOR|HARNESS|FACE_SHIELD]",
+//       "specification": "specific PPE requirements mentioned",
+//       "mandatory": true/false
+//     }
+//   ],
+//   "complianceIssues": [
+//     {
+//       "standard": "[AS/NZS reference or regulation]",
+//       "issue": "specific compliance gap identified",
+//       "action": "required corrective action",
+//       "severity": "[LOW|MEDIUM|HIGH|CRITICAL]"
+//     }
+//   ],
+//   "riskAssessment": {
+//     "initialRisk": "[LOW|MEDIUM|HIGH|CRITICAL]",
+//     "controlsImplemented": ["list of risk controls mentioned"],
+//     "residualRisk": "[LOW|MEDIUM|HIGH|CRITICAL]",
+//     "riskMatrix": {
+//       "consequence": "[1-5]",
+//       "likelihood": "[1-5]",
+//       "riskRating": "[1-25]"
+//     }
+//   },
+//   "summary": "comprehensive assessment of safety risks and form completeness",
+//   "requiresSupervisorReview": true/false,
+//   "formCompleteness": "[COMPLETE|INCOMPLETE|PARTIALLY_COMPLETE]",
+//   "missingFields": ["list of critical missing information"],
+//   "positiveFindings": ["list of good safety practices identified"],
+//   "workLocation": "site/location mentioned in form",
+//   "workActivity": "brief description of work being performed",
+//   "workerDetails": {
+//     "signaturesPresent": true/false,
+//     "supervisorApproval": true/false,
+//     "dateCompleted": "date if mentioned"
+//   },
+//   "emergencyProcedures": {
+//     "mentioned": true/false,
+//     "details": ["emergency procedures referenced"]
+//   }
+// }
+
+// RISK SCORING GUIDELINES:
+// - 1-2: MINIMAL risk - Standard precautions adequate
+// - 3-4: LOW risk - Basic controls sufficient  
+// - 5-6: MEDIUM risk - Additional controls recommended
+// - 7-8: HIGH risk - Supervisor review required, comprehensive controls needed
+// - 9-10: CRITICAL risk - Stop work, immediate management intervention
+
+// FORM TYPE DETECTION CLUES:
+// - "Take 5" or "STOP LOOK ASSESS MANAGE MONITOR" = TAKE_5
+// - "Safe Work Method Statement" or "SWMS" = SWMS  
+// - "Job Safety Analysis" or "JSA" = JSA
+// - "Job Hazard Analysis" or "JHA" = JHA
+// - "Job Safety and Environmental Analysis" or "JSEA" = JSEA
+// - "Pre-Task Brief" or "PTB" or "Pre-Task Briefing" = PTB
+// - "Hazard Assessment" or "Risk Assessment" = HAZARD_ASSESSMENT
+// - "Permit to Work" or "Isolation" = PERMIT_TO_WORK
+
+// Focus on Australian workplace safety standards and construction/industrial best practices.`;
+//   }
+
+//   enhanceAnalysis(analysis, originalText) {
+//     // Ensure all required fields exist with defaults
+//     const enhanced = {
+//       formType: analysis.formType || 'UNKNOWN',
+//       formTypeConfidence: analysis.formTypeConfidence || 'LOW',
+//       riskScore: analysis.riskScore || 5,
+//       riskLevel: analysis.riskLevel || 'MEDIUM',
+//       flaggedIssues: analysis.flaggedIssues || [],
+//       ppeRequired: analysis.ppeRequired || [],
+//       complianceIssues: analysis.complianceIssues || [],
+//       riskAssessment: analysis.riskAssessment || {
+//         initialRisk: 'MEDIUM',
+//         controlsImplemented: [],
+//         residualRisk: 'MEDIUM',
+//         riskMatrix: { consequence: 3, likelihood: 3, riskRating: 9 }
+//       },
+//       summary: analysis.summary || 'Safety analysis completed',
+//       requiresSupervisorReview: analysis.requiresSupervisorReview !== undefined ? 
+//         analysis.requiresSupervisorReview : (analysis.riskScore >= 7),
+//       formCompleteness: analysis.formCompleteness || 'UNKNOWN',
+//       missingFields: analysis.missingFields || [],
+//       positiveFindings: analysis.positiveFindings || [],
+//       workLocation: analysis.workLocation || 'Not specified',
+//       workActivity: analysis.workActivity || 'Not specified',
+//       workerDetails: analysis.workerDetails || {
+//         signaturesPresent: false,
+//         supervisorApproval: false,
+//         dateCompleted: null
+//       },
+//       emergencyProcedures: analysis.emergencyProcedures || {
+//         mentioned: false,
+//         details: []
+//       },
+//       analysisStatus: 'COMPLETED',
+//       metadata: {
+//         provider: 'deepseek',
+//         model: this.model,
+//         timestamp: new Date().toISOString(),
+//         textLength: originalText.length,
+//         processingVersion: '2.0-enhanced'
+//       }
+//     };
+
+//     // Apply additional validation and escalation rules
+//     enhanced.requiresSupervisorReview = this.calculateSupervisorReview(enhanced);
+    
+//     return enhanced;
+//   }
+
+//   calculateSupervisorReview(analysis) {
+//     // Supervisor review required if:
+//     // 1. Risk score >= 7
+//     // 2. CRITICAL severity issues present
+//     // 3. Form incomplete with HIGH risk
+//     // 4. Compliance violations present
+    
+//     if (analysis.riskScore >= 7) return true;
+    
+//     if (analysis.flaggedIssues?.some(issue => issue.severity === 'CRITICAL')) return true;
+    
+//     if (analysis.formCompleteness === 'INCOMPLETE' && analysis.riskScore >= 5) return true;
+    
+//     if (analysis.complianceIssues?.some(issue => issue.severity === 'HIGH' || issue.severity === 'CRITICAL')) return true;
+    
+//     return false;
+//   }
+// }
+
+// class OpenAIProvider {
+//   constructor() {
+//     this.apiKey = process.env.OPENAI_API_KEY;
+//     this.baseUrl = 'https://api.openai.com/v1';
+//     this.model = 'gpt-4';
+//   }
+
+//   async analyzeSafetyForm(extractedText, formType = 'unknown') {
+//     // OpenAI implementation (similar structure to DeepSeek)
+//     logger.info('OpenAI provider called - implement if needed as fallback');
+//     throw new Error('OpenAI provider not implemented yet');
+//   }
+// }
+
+// class AIAnalysisService {
+//   constructor() {
+//     this.providers = {
+//       deepseek: new DeepSeekProvider(),
+//       openai: new OpenAIProvider()
+//     };
+    
+//     this.currentProvider = process.env.AI_PROVIDER || 'deepseek';
+    
+//     if (!this.providers[this.currentProvider]) {
+//       throw new Error(`AI provider '${this.currentProvider}' not supported`);
+//     }
+    
+//     logger.info(`AI Analysis Service initialized with provider: ${this.currentProvider}`);
+//   }
+
+//   async analyzeSafetyForm(extractedText, formType, metadata = {}) {
+//     const provider = this.providers[this.currentProvider];
+    
+//     logger.info('Starting enhanced safety form analysis', {
+//       provider: this.currentProvider,
+//       textLength: extractedText.length,
+//       formType
+//     });
+
+//     const startTime = Date.now();
+//     const analysis = await provider.analyzeSafetyForm(extractedText, formType);
+//     const processingTime = Date.now() - startTime;
+
+//     // Add processing metadata
+//     analysis.metadata = {
+//       ...analysis.metadata,
+//       processingTimeMs: processingTime,
+//       ...metadata
+//     };
+
+//     logger.info('Enhanced safety form analysis completed', {
+//       provider: this.currentProvider,
+//       formType: analysis.formType,
+//       confidence: analysis.formTypeConfidence,
+//       riskScore: analysis.riskScore,
+//       riskLevel: analysis.riskLevel,
+//       issueCount: analysis.flaggedIssues?.length || 0,
+//       ppeCount: analysis.ppeRequired?.length || 0,
+//       processingTime: `${processingTime}ms`,
+//       status: analysis.analysisStatus
+//     });
+
+//     return analysis;
+//   }
+
+//   // Health check method
+//   async healthCheck() {
+//     try {
+//       const provider = this.providers[this.currentProvider];
+      
+//       if (provider instanceof DeepSeekProvider && !provider.apiKey) {
+//         return { status: 'ERROR', message: 'DeepSeek API key not configured' };
+//       }
+      
+//       return { 
+//         status: 'OK', 
+//         provider: this.currentProvider,
+//         capabilities: 'Enhanced Australian safety form analysis',
+//         version: '2.0-enhanced',
+//         timestamp: new Date().toISOString()
+//       };
+//     } catch (error) {
+//       return { 
+//         status: 'ERROR', 
+//         provider: this.currentProvider,
+//         error: error.message 
+//       };
+//     }
+//   }
+// }
+
+// module.exports = new AIAnalysisService();

@@ -1,31 +1,40 @@
 {
-  "name": "safety-forms-frontend",
+  "name": "@safety-forms-app/frontend",
   "version": "1.0.0",
-  "description": "Frontend dashboard for safety forms",
+  "private": true,
+  "description": "React dashboard for safety forms review",
   "type": "module",
   "scripts": {
-    "dev": "c:\\nodejs\\node node_modules/vite/bin/vite.js",
-    "build": "c:\\nodejs\\node node_modules/vite/bin/vite.js build",
-    "preview": "c:\\nodejs\\node node_modules/vite/bin/vite.js preview",
-    "lint": "c:\\nodejs\\node node_modules/eslint/bin/eslint.js src/"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext js,jsx --fix"
   },
   "dependencies": {
-    "axios": "^1.6.7",
-    "lucide-react": "^0.344.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.22.3"
+    "react-router-dom": "^6.25.1",
+    "axios": "^1.7.2",
+    "@tanstack/react-query": "^5.51.1",
+    "react-hook-form": "^7.52.1",
+    "date-fns": "^3.6.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.408.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.56",
-    "@types/react-dom": "^18.2.19",
-    "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.17",
-    "eslint": "^8.56.0",
-    "eslint-plugin-react": "^7.33.2",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "postcss": "^8.4.35",
-    "tailwindcss": "^3.4.1",
-    "vite": "^5.1.4"
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.3.4",
+    "vitest": "^2.0.4",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.3",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.7",
+    "tailwindcss": "^3.4.6",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39"
   }
 }

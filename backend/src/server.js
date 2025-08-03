@@ -4,22 +4,24 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
 require("dotenv").config();
+const formsRouter = require('./routes/forms');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-  })
-);
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true,
-  })
-);
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
 app.use(morgan("combined"));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -44,36 +46,19 @@ app.get("/api/test", (req, res) => {
     message: "Safety Forms API is running!",
     version: "1.0.0",
     endpoints: [
-      "GET /health - Health check",
-      "GET /api/test - Test endpoint",
-      "POST /api/upload - Upload form (coming soon)",
-      "GET /api/forms - Get processed forms (coming soon)",
-      "GET /api/stats - Processing statistics (coming soon)",
-    ],
+  "GET /health - Health check",
+  "GET /api/test - Test endpoint", 
+  "POST /api/forms/upload - Upload and process form image",
+  "GET /api/forms - Get processed forms (coming soon)",
+  "GET /api/stats - Processing statistics (coming soon)",
+  ]
   });
 });
+
+
+app.use('/api/forms', formsRouter);
 
 // Placeholder routes for future implementation
-app.post("/api/upload", (req, res) => {
-  res.status(501).json({
-    error: "Upload endpoint not implemented yet",
-    message: "This will handle form photo uploads and processing",
-  });
-});
-
-app.get("/api/forms", (req, res) => {
-  res.status(501).json({
-    error: "Forms endpoint not implemented yet",
-    message: "This will return processed forms for supervisor review",
-  });
-});
-
-app.get("/api/forms/:id", (req, res) => {
-  res.status(501).json({
-    error: "Form detail endpoint not implemented yet",
-    message: `This will return details for form ${req.params.id}`,
-  });
-});
 
 app.get("/api/stats", (req, res) => {
   res.status(501).json({
