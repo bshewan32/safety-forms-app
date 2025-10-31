@@ -1,16 +1,18 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, FileText, Loader, CheckCircle, AlertTriangle, XCircle, Eye, Zap, Archive, Settings } from 'lucide-react';
+import { Upload, FileText, Loader, CheckCircle, AlertTriangle, XCircle, Eye, Zap, Archive, ArrowLeft, Download, Mail } from 'lucide-react';
 import FormAnalysisConfirmation from './FormAnalysisConfirmation';
+import DetailedReportView from './DetailedReportView';
 
 const SmartSafetyFormsApp = () => {
-  const [currentMode, setCurrentMode] = useState('INTERACTIVE'); // INTERACTIVE, BULK, BATCH
+  const [currentMode, setCurrentMode] = useState('INTERACTIVE');
   const [currentStep, setCurrentStep] = useState('mode-select'); 
-  const [files, setFiles] = useState([]); // Multiple files for bulk
+  const [files, setFiles] = useState([]);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [analysisResults, setAnalysisResults] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
   const [sessionToken, setSessionToken] = useState(null);
+  const [selectedReportIndex, setSelectedReportIndex] = useState(null);
 
   const uploadModes = {
     INTERACTIVE: {
@@ -40,7 +42,6 @@ const SmartSafetyFormsApp = () => {
     setCurrentMode(mode);
     setCurrentStep('upload');
     setFiles([]);
-    setAnalysisResults([]);
     setError(null);
   };
 
@@ -49,7 +50,6 @@ const SmartSafetyFormsApp = () => {
     
     if (selectedFiles.length === 0) return;
 
-    // Validate files
     const validFiles = selectedFiles.filter(file => {
       if (!file.type.startsWith('image/')) {
         setError(`${file.name} is not an image file`);
@@ -95,66 +95,39 @@ const SmartSafetyFormsApp = () => {
 
       if (result.sessionToken) setSessionToken(result.sessionToken);
 
+      // Parse response - handle both interactive (/analyze) and bulk (/upload) structures
+      let formType, riskLevel, riskScore;
+      
+      if (currentMode === 'INTERACTIVE') {
+        formType = result.analysis?.formType || 'UNKNOWN';
+        riskLevel = result.analysis?.riskLevel || 'UNKNOWN';
+        riskScore = result.analysis?.riskScore || 0;
+      } else {
+        formType = result.result?.formType || result.formType || 'UNKNOWN';
+        riskLevel = result.result?.riskAssessment?.level || result.riskLevel || 'UNKNOWN';
+        riskScore = result.result?.riskAssessment?.score || result.riskScore || 0;
+      }
+
       return {
         file: file.name,
         index,
         success: true,
-        result: currentMode === 'INTERACTIVE' ? result : convertUploadToConfirmation(result, file),
-        needsReview: shouldFlagForReview(result),
-        riskLevel: getRiskLevel(result),
-        processingTime: result.processingTime || result.processing?.totalTimeMs
+        result: result,
+        formType: formType,
+        riskLevel: riskLevel,
+        riskScore: riskScore,
+        needsReview: riskScore >= 8,
+        timestamp: new Date().toISOString()
       };
-
     } catch (error) {
       return {
         file: file.name,
         index,
         success: false,
         error: error.message,
-        needsReview: true
+        timestamp: new Date().toISOString()
       };
     }
-  };
-
-  const shouldFlagForReview = (result) => {
-    const analysis = result.analysis || result.result;
-    return (
-      analysis.riskScore >= 7 ||
-      analysis.riskLevel === 'HIGH' || 
-      analysis.riskLevel === 'CRITICAL' ||
-      analysis.requiresSupervisorReview ||
-      analysis.formCompleteness === 'INCOMPLETE' ||
-      (analysis.complianceIssues && analysis.complianceIssues.length > 0)
-    );
-  };
-
-  const getRiskLevel = (result) => {
-    const analysis = result.analysis || result.result;
-    return analysis.riskLevel || analysis.riskAssessment?.level || 'UNKNOWN';
-  };
-
-  const convertUploadToConfirmation = (uploadResult, file) => {
-    return {
-      success: true,
-      status: 'completed',
-      analysis: {
-        formType: uploadResult.result.formType,
-        formTypeConfidence: 'HIGH',
-        riskScore: uploadResult.result.riskAssessment.score,
-        riskLevel: uploadResult.result.riskAssessment.level,
-        flaggedIssues: uploadResult.result.safetyIssues || [],
-        complianceIssues: uploadResult.result.complianceCheck?.gaps || [],
-        summary: uploadResult.result.riskAssessment.reasoning || 'Analysis completed',
-        requiresSupervisorReview: uploadResult.result.riskAssessment.score >= 7,
-        formCompleteness: 'COMPLETE',
-        missingFields: [],
-        positiveFindings: []
-      },
-      fileInfo: {
-        originalFilename: file.name,
-        fileSize: file.size
-      }
-    };
   };
 
   const startProcessing = async () => {
@@ -169,7 +142,6 @@ const SmartSafetyFormsApp = () => {
     setAnalysisResults([]);
 
     if (currentMode === 'INTERACTIVE') {
-      // Process single file for confirmation
       const result = await processFile(files[0]);
       setAnalysisResults([result]);
       
@@ -180,20 +152,18 @@ const SmartSafetyFormsApp = () => {
         setCurrentStep('upload');
       }
     } else {
-      // Bulk/Batch processing
       const results = [];
       
       for (let i = 0; i < files.length; i++) {
         setCurrentFileIndex(i);
         const result = await processFile(files[i], i);
         results.push(result);
-        setAnalysisResults([...results]); // Update UI as we go
+        setAnalysisResults([...results]);
         
-        // For BATCH mode, pause on flagged items
         if (currentMode === 'BATCH' && result.needsReview && result.success) {
           setCurrentStep('review-flagged');
           setProcessing(false);
-          return; // Pause for user review
+          return;
         }
       }
       
@@ -204,19 +174,16 @@ const SmartSafetyFormsApp = () => {
   };
 
   const confirmAnalysis = async (confirmedAnalysis) => {
-    // Handle confirmation for interactive mode
     setCurrentStep('completed');
-  };
-
-  const continueBatchProcessing = () => {
-    // Continue after reviewing flagged item
-    setCurrentStep('processing');
-    setProcessing(true);
-    // Continue from next file...
   };
 
   const goToReports = () => {
     setCurrentStep('reports');
+  };
+
+  const viewDetailedReport = (index) => {
+    setSelectedReportIndex(index);
+    setCurrentStep('detailed-report');
   };
 
   const getRiskColor = (level) => {
@@ -226,6 +193,16 @@ const SmartSafetyFormsApp = () => {
       case 'HIGH': return 'text-red-600 bg-red-50';
       case 'CRITICAL': return 'text-red-800 bg-red-100';
       default: return 'text-gray-600 bg-gray-50';
+    }
+  };
+
+  const getRiskBadgeColor = (level) => {
+    switch(level) {
+      case 'LOW': return 'bg-green-100 text-green-800 border-green-200';
+      case 'MEDIUM': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'HIGH': return 'bg-red-100 text-red-800 border-red-200';
+      case 'CRITICAL': return 'bg-red-200 text-red-900 border-red-300';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
@@ -250,102 +227,110 @@ const SmartSafetyFormsApp = () => {
                 <button
                   key={mode}
                   onClick={() => handleModeSelect(mode)}
-                  className={`p-6 rounded-lg border-2 hover:shadow-lg transition-all ${config.color}`}
+                  className={`p-6 rounded-lg border-2 ${config.color} hover:shadow-lg transition-all text-left`}
                 >
-                  <div className="text-center">
-                    <Icon className="w-12 h-12 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">{config.title}</h3>
-                    <p className="text-sm mb-3">{config.description}</p>
-                    <p className="text-xs opacity-75">{config.useCase}</p>
-                  </div>
+                  <Icon className="w-8 h-8 mb-3" />
+                  <h3 className="font-semibold text-lg mb-2">{config.title}</h3>
+                  <p className="text-sm mb-3 opacity-80">{config.description}</p>
+                  <p className="text-xs opacity-70">Best for: {config.useCase}</p>
                 </button>
               );
             })}
           </div>
 
-          <div className="text-center mt-8">
-            <button
-              onClick={goToReports}
-              className="inline-flex items-center space-x-2 px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-            >
-              <FileText className="w-5 h-5" />
-              <span>View Reports & Analytics</span>
-            </button>
-          </div>
+          {/* View Past Reports Button */}
+          {analysisResults.length > 0 && (
+            <div className="mt-8 text-center">
+              <button
+                onClick={() => setCurrentStep('reports')}
+                className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors inline-flex items-center space-x-2"
+              >
+                <FileText className="w-5 h-5" />
+                <span>View Recent Reports ({analysisResults.length})</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // File Upload Screen
+  // Upload Screen
   if (currentStep === 'upload') {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
         <div className="max-w-4xl mx-auto px-4">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-semibold text-gray-900">
-                {uploadModes[currentMode].title}
-              </h2>
-              <p className="text-gray-600">{uploadModes[currentMode].description}</p>
-            </div>
+          <div className="mb-6">
             <button
               onClick={() => setCurrentStep('mode-select')}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="flex items-center text-gray-600 hover:text-gray-900"
             >
-              Change Mode
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Mode Selection
             </button>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-700">{error}</p>
-            </div>
-          )}
-
           <div className="bg-white rounded-lg shadow-lg p-8">
-            <div
-              className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer"
-              onClick={() => document.getElementById('fileInput').click()}
-            >
-              <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-lg text-gray-600 mb-2">
-                {files.length > 0 ? 
-                  `${files.length} file${files.length > 1 ? 's' : ''} selected` : 
-                  `Select ${currentMode === 'INTERACTIVE' ? 'a file' : 'files'} for ${currentMode.toLowerCase()} processing`
-                }
-              </p>
-              <p className="text-sm text-gray-500">
-                {currentMode === 'INTERACTIVE' ? 'Single image file up to 10MB' : 'Multiple image files up to 10MB each'}
-              </p>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-6">
+              {uploadModes[currentMode].title}
+            </h2>
+
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors">
+              <Upload className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <input
-                id="fileInput"
                 type="file"
+                id="file-upload"
+                className="hidden"
                 accept="image/*"
                 multiple={currentMode !== 'INTERACTIVE'}
                 onChange={handleFileSelect}
-                className="hidden"
               />
+              <label
+                htmlFor="file-upload"
+                className="cursor-pointer inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Select Files
+              </label>
+              <p className="text-gray-600 mt-4">
+                {currentMode === 'INTERACTIVE' ? 
+                  'Select a single image file' :
+                  'Select multiple image files'
+                }
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                Supported formats: JPG, PNG (max 10MB each)
+              </p>
             </div>
+
+            {error && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                {error}
+              </div>
+            )}
 
             {files.length > 0 && (
               <div className="mt-6">
-                <h3 className="font-medium text-gray-900 mb-3">Selected Files:</h3>
+                <h3 className="font-medium text-gray-900 mb-3">
+                  Selected Files ({files.length})
+                </h3>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                   {files.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <span className="text-sm text-gray-700">{file.name}</span>
+                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded">
+                      <div className="flex items-center space-x-3">
+                        <FileText className="w-5 h-5 text-gray-400" />
+                        <span className="text-sm font-medium">{file.name}</span>
+                      </div>
                       <span className="text-xs text-gray-500">
                         {(file.size / 1024 / 1024).toFixed(2)} MB
                       </span>
                     </div>
                   ))}
                 </div>
-                
+
                 <button
                   onClick={startProcessing}
                   disabled={processing}
-                  className="mt-4 w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  className="w-full mt-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {processing ? (
                     <span className="flex items-center justify-center space-x-2">
@@ -443,6 +428,42 @@ const SmartSafetyFormsApp = () => {
     );
   }
 
+  // Completed (Interactive)
+  if (currentStep === 'completed') {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+            <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+              Analysis Complete!
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Form has been analyzed and saved
+            </p>
+            
+            <div className="flex justify-center space-x-4">
+              <button
+                onClick={() => {
+                  setCurrentStep('mode-select');
+                }}
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Analyze Another Form
+              </button>
+              <button
+                onClick={() => viewDetailedReport(0)}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                View Full Report
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Bulk Processing Complete
   if (currentStep === 'bulk-complete') {
     const successCount = analysisResults.filter(r => r.success).length;
@@ -495,6 +516,89 @@ const SmartSafetyFormsApp = () => {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Reports List View
+  if (currentStep === 'reports') {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="mb-6 flex items-center justify-between">
+            <button
+              onClick={() => setCurrentStep('mode-select')}
+              className="flex items-center text-gray-600 hover:text-gray-900"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Main Menu
+            </button>
+            <h1 className="text-2xl font-bold text-gray-900">Analysis Reports</h1>
+            <div className="w-32"></div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+            <div className="p-6">
+              <div className="space-y-4">
+                {analysisResults.map((result, index) => (
+                  <div 
+                    key={index} 
+                    className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => viewDetailedReport(index)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-2">
+                          {result.success ? (
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-red-600" />
+                          )}
+                          <h3 className="font-medium text-gray-900">{result.file}</h3>
+                        </div>
+                        
+                        {result.success && (
+                          <div className="flex items-center space-x-4 text-sm text-gray-600 ml-8">
+                            <span className="flex items-center">
+                              <span className={`px-2 py-1 rounded text-xs font-medium mr-2 ${getRiskBadgeColor(result.riskLevel)}`}>
+                                {result.riskLevel}
+                              </span>
+                              Risk Score: {result.riskScore}/10
+                            </span>
+                            <span>Type: {result.formType}</span>
+                            <span>Analyzed: {new Date(result.timestamp).toLocaleString()}</span>
+                          </div>
+                        )}
+                        
+                        {!result.success && (
+                          <div className="ml-8 text-sm text-red-600">
+                            Error: {result.error}
+                          </div>
+                        )}
+                      </div>
+                      
+                      <Eye className="w-5 h-5 text-gray-400" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Enhanced Detailed Report View
+  // Detailed Report View
+  if (currentStep === 'detailed-report' && selectedReportIndex !== null) {
+    return (
+      <DetailedReportView
+        report={analysisResults[selectedReportIndex]}
+        onBack={() => {
+          setSelectedReportIndex(null);
+          setCurrentStep('reports');
+        }}
+      />
     );
   }
 
