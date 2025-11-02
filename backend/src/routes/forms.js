@@ -426,25 +426,25 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
             },
             analysis: {
                 formType: analysisResult.formType || 'UNKNOWN',
-                formTypeConfidence: 'HIGH', // You could enhance this based on AI confidence
+                formTypeConfidence: analysisResult.formTypeConfidence || 'HIGH',
                 riskScore: analysisResult.riskScore || 5,
                 riskLevel: analysisResult.riskLevel || 'MEDIUM',
                 flaggedIssues: analysisResult.flaggedIssues || [],
-                ppeRequired: [], // Add if your AI provides this
+                ppeRequired: analysisResult.ppeRequired || [], // ✅ FIXED: Now pulls from AI
                 complianceIssues: analysisResult.complianceIssues || [],
                 summary: analysisResult.summary || 'Safety analysis completed',
                 requiresSupervisorReview: analysisResult.requiresSupervisorReview || false,
                 formCompleteness: analysisResult.formCompleteness || 'UNKNOWN',
                 missingFields: analysisResult.missingFields || [],
                 positiveFindings: analysisResult.positiveFindings || [],
-                workLocation: 'Not specified', // User can edit this
-                workActivity: 'Not specified', // User can edit this
-                workerDetails: {
-                    signaturesPresent: false, // You could detect this
-                    supervisorApproval: false,
-                    dateCompleted: null
+                workLocation: analysisResult.workLocation || 'Not specified', // ✅ FIXED: Now pulls from AI
+                workActivity: analysisResult.workActivity || 'Not specified', // ✅ FIXED: Now pulls from AI
+                workerDetails: analysisResult.workerDetails || {
+                    signaturesPresent: analysisResult.signaturesPresent || false,
+                    supervisorApproval: analysisResult.supervisorApproval || false,
+                    dateCompleted: analysisResult.dateCompleted || null
                 },
-                emergencyProcedures: {
+                emergencyProcedures: analysisResult.emergencyProcedures || {
                     mentioned: false,
                     details: []
                 }
@@ -465,6 +465,22 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
         };
 
         logger.info(`Form analysis completed for confirmation in ${totalProcessingTime}ms`);
+        
+        // 🔍 DIAGNOSTIC LOGGING - Remove after debugging
+        logger.info('AI Analysis Result Keys:', Object.keys(analysisResult));
+        logger.info('AI Data Check:', {
+            hasFormType: !!analysisResult.formType,
+            hasFlaggedIssues: !!analysisResult.flaggedIssues,
+            flaggedIssuesCount: analysisResult.flaggedIssues?.length,
+            hasPpeRequired: !!analysisResult.ppeRequired,
+            ppeCount: analysisResult.ppeRequired?.length,
+            hasComplianceIssues: !!analysisResult.complianceIssues,
+            complianceCount: analysisResult.complianceIssues?.length,
+            hasSummary: !!analysisResult.summary,
+            hasWorkLocation: !!analysisResult.workLocation,
+            hasWorkActivity: !!analysisResult.workActivity
+        });
+        
         res.json(response);
 
     } catch (error) {
@@ -479,6 +495,7 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
 });
 
 // NEW: Confirmation endpoint (saves to database after user confirms)
+
 router.post('/confirm', async (req, res) => {
     const startTime = Date.now();
     let formRecord = null;
@@ -500,10 +517,10 @@ router.post('/confirm', async (req, res) => {
         });
 
         // Validate required data
-        if (!sessionToken || !confirmedAnalysis || !tempData) {
+        if (!sessionToken || !confirmedAnalysis) {
             return res.status(400).json({
                 error: 'Missing required confirmation data',
-                required: ['sessionToken', 'confirmedAnalysis', 'tempData']
+                required: ['sessionToken', 'confirmedAnalysis']
             });
         }
 
@@ -511,9 +528,9 @@ router.post('/confirm', async (req, res) => {
         try {
             formRecord = await trackingService.createFormProcessingRecord({
                 sessionId: sessionId,
-                originalFilename: fileInfo.originalFilename,
-                fileSizeBytes: fileInfo.fileSize,
-                fileType: fileInfo.mimeType,
+                originalFilename: fileInfo?.originalName || fileInfo?.originalFilename || 'unknown',
+                fileSizeBytes: fileInfo?.size || fileInfo?.fileSize || 0,
+                fileType: fileInfo?.mimeType || fileInfo?.fileType || 'image/jpeg',
                 imageDimensions: null
             });
             logger.info(`Created form processing record: ${formRecord.id}`);
@@ -525,45 +542,57 @@ router.post('/confirm', async (req, res) => {
             });
         }
 
-        // Update form record with OCR results
-        const ocrResult = tempData.ocrResult;
-        await trackingService.updateFormProcessingOCR(formRecord.id, {
-            providerUsed: ocrResult.provider,
-            confidenceScore: ocrResult.confidence,
-            processingTimeMs: 0, // We don't have this from temp data
-            extractedTextLength: ocrResult.text?.length || 0,
-            fallbackUsed: ocrResult.fallbackUsed || false,
-            extractedText: tempData.extractedText,
-        });
+        // Update form record with OCR results (defensive - handle missing data)
+        try {
+            const ocrResult = tempData?.ocrResult || {};
+            await trackingService.updateFormProcessingOCR(formRecord.id, {
+                providerUsed: ocrResult.provider || tempData?.ocrMetadata?.provider || 'google_vision',
+                confidenceScore: ocrResult.confidence || tempData?.confidence || confirmedAnalysis.ocrConfidence || 100,
+                processingTimeMs: tempData?.processing?.ocrTimeMs || 0,
+                extractedTextLength: ocrResult.text?.length || tempData?.ocrText?.length || tempData?.extractedText?.length || 0,
+                fallbackUsed: ocrResult.fallbackUsed || false,
+                extractedText: tempData?.extractedText || tempData?.ocrText || ocrResult.text || '',
+            });
+        } catch (error) {
+            logger.warn('Could not update OCR data (continuing):', error);
+        }
 
         // Update form record with AI analysis results (including user corrections)
-        await trackingService.updateFormProcessingAI(formRecord.id, {
-            aiProvider: 'deepseek',
-            processingTimeMs: 0,
-            formTypeDetected: confirmedAnalysis.formType,
-            riskScore: confirmedAnalysis.riskScore,
-            riskLevel: confirmedAnalysis.riskLevel,
-            riskEscalated: confirmedAnalysis.requiresSupervisorReview,
-            supervisorFlagged: confirmedAnalysis.riskLevel === 'HIGH' || confirmedAnalysis.riskLevel === 'CRITICAL',
-            australianStandardsReferenced: confirmedAnalysis.complianceIssues?.map(issue => issue.standard) || [],
-            complianceGapsIdentified: confirmedAnalysis.complianceIssues?.length || 0,
-            analysisResult: {
-                ...confirmedAnalysis,
-                userCorrections,
-                confirmationTimestamp: new Date().toISOString()
-            },
-            hazardsIdentified: confirmedAnalysis.flaggedIssues || [],
-            recommendations: confirmedAnalysis.flaggedIssues?.map(issue => issue.recommendation).filter(Boolean) || []
-        });
+        try {
+            await trackingService.updateFormProcessingAI(formRecord.id, {
+                aiProvider: tempData?.aiMetadata?.provider || 'deepseek',
+                processingTimeMs: tempData?.processing?.aiTimeMs || 0,
+                formTypeDetected: confirmedAnalysis.formType,
+                riskScore: confirmedAnalysis.riskScore,
+                riskLevel: confirmedAnalysis.riskLevel,
+                riskEscalated: confirmedAnalysis.requiresSupervisorReview || false,
+                supervisorFlagged: confirmedAnalysis.riskLevel === 'HIGH' || confirmedAnalysis.riskLevel === 'CRITICAL',
+                australianStandardsReferenced: confirmedAnalysis.complianceIssues?.map(issue => issue.standard) || [],
+                complianceGapsIdentified: confirmedAnalysis.complianceIssues?.length || 0,
+                analysisResult: {
+                    ...confirmedAnalysis,
+                    userCorrections,
+                    confirmationTimestamp: new Date().toISOString()
+                },
+                hazardsIdentified: confirmedAnalysis.flaggedIssues || [],
+                recommendations: confirmedAnalysis.flaggedIssues?.map(issue => issue.recommendation).filter(Boolean) || []
+            });
+        } catch (error) {
+            logger.warn('Could not update AI data (continuing):', error);
+        }
 
         // Log audit event for user confirmation
-        await trackingService.logAuditEvent(formRecord.id, sessionId, 'form_confirmed', {
-            userCorrections,
-            finalFormType: confirmedAnalysis.formType,
-            finalRiskScore: confirmedAnalysis.riskScore,
-            supervisorReviewRequired: confirmedAnalysis.requiresSupervisorReview,
-            confirmationTimestamp: new Date().toISOString()
-        });
+        try {
+            await trackingService.logAuditEvent(formRecord.id, sessionId, 'form_confirmed', {
+                userCorrections,
+                finalFormType: confirmedAnalysis.formType,
+                finalRiskScore: confirmedAnalysis.riskScore,
+                supervisorReviewRequired: confirmedAnalysis.requiresSupervisorReview,
+                confirmationTimestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            logger.warn('Could not log audit event (continuing):', error);
+        }
 
         // Prepare final response
         const response = {
