@@ -1,4 +1,6 @@
 // backend/prisma/schema.prisma
+// Safety Forms Analyzer - Complete Schema
+// Updated: November 2025
 
 generator client {
   provider = "prisma-client-js"
@@ -8,6 +10,10 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ============================================================================
+// MAIN FORMS TABLE
+// ============================================================================
 
 model ProcessedForm {
   id                      String   @id @default(cuid())
@@ -36,7 +42,12 @@ model ProcessedForm {
   @@index([status, createdAt])
   @@index([riskScore, createdAt])
   @@index([site, formType])
+  @@index([formType])
 }
+
+// ============================================================================
+// SAFETY ISSUES
+// ============================================================================
 
 model SafetyIssue {
   id          String      @id @default(cuid())
@@ -54,7 +65,12 @@ model SafetyIssue {
   
   @@map("safety_issues")
   @@index([category, severity])
+  @@index([formId])
 }
+
+// ============================================================================
+// COMPLIANCE CHECKS
+// ============================================================================
 
 model ComplianceCheck {
   id          String      @id @default(cuid())
@@ -68,7 +84,12 @@ model ComplianceCheck {
   form        ProcessedForm @relation(fields: [formId], references: [id], onDelete: Cascade)
   
   @@map("compliance_checks")
+  @@index([formId])
 }
+
+// ============================================================================
+// PROCESSING LOGS
+// ============================================================================
 
 model ProcessingLog {
   id            String      @id @default(cuid())
@@ -82,7 +103,12 @@ model ProcessingLog {
   
   @@map("processing_logs")
   @@index([status, createdAt])
+  @@index([processingId])
 }
+
+// ============================================================================
+// USERS
+// ============================================================================
 
 model User {
   id          String      @id @default(cuid())
@@ -97,6 +123,10 @@ model User {
   @@map("users")
 }
 
+// ============================================================================
+// SYSTEM CONFIGURATION
+// ============================================================================
+
 model SystemConfig {
   id          String      @id @default(cuid())
   key         String      @unique
@@ -107,52 +137,97 @@ model SystemConfig {
   @@map("system_config")
 }
 
-// Enums
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+// Form Types - 32 different safety form categories
 enum FormType {
-  TAKE5
-  SWMS
-  JSEA
-  JHA
-  INCIDENT_REPORT
-  TOOLBOX_TALK
-  OTHER
+  // Pre-Work Planning (6)
+  TAKE5                      // Take 5 safety check
+  PRE_TASK_BRIEF            // Pre-task safety briefing
+  JSEA                      // Job Safety Environmental Analysis
+  JSA                       // Job Safety Analysis
+  JHA                       // Job Hazard Analysis
+  SWMS                      // Safe Work Method Statement
+  
+  // Assessments (3)
+  HAZARD_ASSESSMENT         // General hazard assessment
+  RISK_ASSESSMENT           // Detailed risk assessment
+  SITE_ASSESSMENT           // Site safety assessment
+  
+  // Inspections (4)
+  INSPECTION_REPORT         // General inspection
+  EQUIPMENT_INSPECTION      // Equipment/tools inspection
+  VEHICLE_CHECKLIST         // Vehicle pre-start check
+  WORKPLACE_INSPECTION      // Workplace safety inspection
+  
+  // Permits (5)
+  PERMIT_TO_WORK           // General work permit
+  HOT_WORK_PERMIT          // Hot work/welding permit
+  CONFINED_SPACE_ENTRY     // Confined space permit
+  HEIGHT_WORK_PERMIT       // Working at height permit
+  EXCAVATION_PERMIT        // Excavation work permit
+  
+  // Training & Induction (4)
+  TOOLBOX_TALK             // Toolbox/safety meeting
+  SITE_INDUCTION           // Site induction form
+  TRAINING_RECORD          // Training attendance/completion
+  COMPETENCY_ASSESSMENT    // Skills/competency check
+  
+  // Incidents & Reporting (4)
+  INCIDENT_REPORT          // Incident/accident report
+  NEAR_MISS               // Near miss report
+  HAZARD_REPORT           // Hazard identification report
+  INJURY_REPORT           // Injury/first aid report
+  
+  // Other (4)
+  EMERGENCY_DRILL         // Emergency evacuation drill
+  SAFE_OPERATING_PROCEDURE // SOP documentation
+  ENVIRONMENTAL_CHECK     // Environmental monitoring
+  OTHER                   // Other/unclassified
 }
 
+// Form Processing Status
 enum FormStatus {
-  PENDING_REVIEW
-  APPROVED
-  REJECTED
-  ARCHIVED
+  PENDING_REVIEW    // Awaiting supervisor review
+  APPROVED          // Approved by supervisor
+  REJECTED          // Rejected - needs correction
+  ARCHIVED          // Archived/completed
 }
 
+// Safety Issue Categories
 enum IssueCategory {
-  PPE
-  HAZARD
-  PROCEDURE
-  DOCUMENTATION
-  ENVIRONMENTAL
-  EQUIPMENT
-  TRAINING
-  OTHER
+  PPE               // Personal Protective Equipment
+  HAZARD            // General hazard
+  PROCEDURE         // Procedure/process issue
+  DOCUMENTATION     // Documentation incomplete/incorrect
+  ENVIRONMENTAL     // Environmental concern
+  EQUIPMENT         // Equipment/tool issue
+  TRAINING          // Training/competency gap
+  OTHER             // Other issue
 }
 
+// Issue Severity Levels
 enum Severity {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
+  LOW               // Low risk - minor issue
+  MEDIUM            // Medium risk - needs attention
+  HIGH              // High risk - urgent action required
+  CRITICAL          // Critical risk - stop work
 }
 
+// Processing Status
 enum ProcessingStatus {
-  PROCESSING
-  COMPLETED
-  FAILED
-  RETRYING
+  PROCESSING        // Currently processing
+  COMPLETED         // Successfully completed
+  FAILED            // Processing failed
+  RETRYING          // Retrying after failure
 }
 
+// User Roles
 enum UserRole {
-  WORKER
-  SUPERVISOR
-  ADMIN
-  SUPER_ADMIN
+  WORKER            // Standard worker
+  SUPERVISOR        // Supervisor - can review/approve
+  ADMIN             // Administrator - full access
+  SUPER_ADMIN       // Super admin - system config
 }
