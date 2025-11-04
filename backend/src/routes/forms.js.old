@@ -6,7 +6,6 @@ const ocrService = require('../services/ocr/ocrService');
 const aiAnalysisService = require('../services/ai/aiAnalysisService');
 const trackingService = require('../services/database/trackingService');
 const logger = require('../services/utils/logger');
-const pdfService = require('../services/pdf/pdfService');
 
 const router = express.Router();
 
@@ -942,122 +941,6 @@ router.get('/list', async (req, res) => {
         });
     }
 });
-
-router.post('/:id/pdf', async (req, res) => {
-    try {
-        const { id } = req.params;
-        
-        logger.info(`📄 PDF generation request for form ${id}`);
-
-        // Get form from database
-        let form;
-        try {
-            form = await trackingService.getFormById(id);
-            
-            if (!form) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Form not found',
-                    formId: id
-                });
-            }
-        } catch (error) {
-            logger.error('Error fetching form:', error);
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to fetch form data',
-                details: error.message
-            });
-        }
-
-        // Transform database form to report format
-        const analysis = typeof form.aiAnalysis === 'string' 
-            ? JSON.parse(form.aiAnalysis) 
-            : form.aiAnalysis;
-
-        const report = {
-            file: form.originalFileName || 'Unknown',
-            formType: form.formType,
-            riskScore: form.riskScore,
-            timestamp: form.createdAt.toISOString(),
-            fullAnalysis: analysis,
-            id: form.id
-        };
-
-        // Generate PDF
-        try {
-            const pdfBuffer = await pdfService.generateReport(report);
-
-            logger.info(`✅ PDF generated successfully for form ${id}`);
-
-            // Set headers for PDF download
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="safety-report-${id}.pdf"`);
-            res.setHeader('Content-Length', pdfBuffer.length);
-
-            // Send PDF
-            res.send(pdfBuffer);
-
-        } catch (pdfError) {
-            logger.error('Failed to generate PDF:', pdfError);
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to generate PDF',
-                details: pdfError.message
-            });
-        }
-
-    } catch (error) {
-        logger.error('PDF endpoint error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            details: error.message
-        });
-    }
-});
-
-/**
- * POST /api/forms/pdf/generate
- * Generate PDF from in-memory report (for unsaved reports)
- */
-router.post('/pdf/generate', async (req, res) => {
-    try {
-        const { report } = req.body;
-
-        if (!report || !report.fullAnalysis) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid report data'
-            });
-        }
-
-        logger.info(`📄 Generating PDF for unsaved report: ${report.file}`);
-
-        // Generate PDF
-        const pdfBuffer = await pdfService.generateReport(report);
-
-        logger.info(`✅ PDF generated successfully`);
-
-        // Set headers for PDF download
-        const filename = `safety-report-${Date.now()}.pdf`;
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Content-Length', pdfBuffer.length);
-
-        // Send PDF
-        res.send(pdfBuffer);
-
-    } catch (error) {
-        logger.error('PDF generation error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to generate PDF',
-            details: error.message
-        });
-    }
-});
-
 
 module.exports = router;
 

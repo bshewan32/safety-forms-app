@@ -1,5 +1,6 @@
 import React from 'react';
-import { ArrowLeft, FileText, Shield, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Shield, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import ShareReportButton from './ShareReportButton';
 
 const DetailedReportView = ({ report, onBack }) => {
   // Safety check
@@ -44,16 +45,17 @@ const DetailedReportView = ({ report, onBack }) => {
     <div className="min-h-screen bg-gray-50 py-4 md:py-8">
       <div className="max-w-4xl mx-auto px-4">
         {/* Back Button */}
-        <div className="mb-4 md:mb-6">
-          <button
-            onClick={onBack}
-            className="flex items-center text-gray-600 hover:text-gray-900 touch-manipulation active:scale-95 p-2 -ml-2"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            <span className="text-sm md:text-base">Back to Reports</span>
-          </button>
-        </div>
-
+        <div className="flex flex-wrap gap-2">
+        <ShareReportButton 
+          report={report}
+          className="flex-1 md:flex-none"/>
+        <button
+          onClick={() => window.print()}
+          className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg">
+          <Download className="w-4 h-4" />
+          <span>Print</span>
+        </button>
+      </div>
         <div className="bg-white rounded-lg shadow-xl overflow-hidden">
           {/* Header */}
           <div className="p-4 md:p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-blue-100">
