@@ -309,8 +309,61 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
-// Add this to your forms.js routes (after your existing /upload endpoint)
+router.post('/analyze-multi', upload.array('files', 10), async (req, res) => {
+    try {
+        const files = req.files;
 
+        if (!files || files.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No files uploaded'
+            });
+        }
+
+        logger.info(`Processing ${files.length} pages for multi-page analysis`);
+
+        // Run OCR on all files
+        const ocrPromises = files.map(file =>
+            ocrService.extractText(file.buffer)
+        );
+        const ocrResults = await Promise.all(ocrPromises);
+
+        // Combine all pages
+        const combinedText = ocrResults
+            .map((result, i) => `=== PAGE ${i + 1} ===\n\n${result.text}`)
+            .join('\n\n');
+
+        logger.info(`Combined text from ${files.length} pages, total length: ${combinedText.length} chars`);
+
+        // Analyze as one form
+        const analysis = await aiAnalysisService.analyzeSafetyForm(
+            combinedText,
+            req.body.formType
+        );
+
+        logger.info(`Multi-page analysis completed: ${analysis.formType}, risk: ${analysis.riskLevel}`);
+
+        res.json({
+            success: true,
+            analysis,
+            totalPages: files.length,
+            ocrResults: ocrResults.map((r, i) => ({
+                page: i + 1,
+                confidence: r.confidence,
+                provider: r.provider,
+                textLength: r.text.length
+            }))
+        });
+
+    } catch (error) {
+        logger.error('Multi-page analysis failed:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
 // NEW: Analysis endpoint for interactive mode (returns data for confirmation)
 router.post('/analyze', upload.single('file'), async (req, res) => {
     const startTime = Date.now();
